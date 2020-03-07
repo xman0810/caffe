@@ -115,9 +115,17 @@ void BatchNormLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   }
 
   // subtract mean
+  // shape 1, 64, 112, 112
+  // [1 X 1] x [1 X 64] = [1 X 64]
+  // 1 * batch_sum_multiplier_ * mean_ + 0 * num_by_chans_ = num_by_chans_;
+  //
   caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num, channels_, 1, 1,
       batch_sum_multiplier_.cpu_data(), mean_.cpu_data(), 0.,
       num_by_chans_.mutable_cpu_data());
+
+  // [64 x 1] x [1 X 12544] = [64 x 12544]
+  // -1 * num_by_chans_ * spatial_sum_multiplier_ + 1 * top_data = top_data;
+  //
   caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, channels_ * num,
       spatial_dim, 1, -1, num_by_chans_.cpu_data(),
       spatial_sum_multiplier_.cpu_data(), 1., top_data);
@@ -147,17 +155,27 @@ void BatchNormLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   }
 
   // normalize variance
+  // variance_ = variance_ + eps_
+  // variance_ = sqrt(variance_);
   caffe_add_scalar(variance_.count(), eps_, variance_.mutable_cpu_data());
   caffe_sqrt(variance_.count(), variance_.cpu_data(),
              variance_.mutable_cpu_data());
 
   // replicate variance to input size
+  // [1 X 1] x [1 X 64] = [1 X 64]
+  // 1 * batch_sum_multiplier_ * variance_ + 0 * num_by_chans_ = num_by_chans_
   caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num, channels_, 1, 1,
       batch_sum_multiplier_.cpu_data(), variance_.cpu_data(), 0.,
       num_by_chans_.mutable_cpu_data());
+
+  // [64 X 1] x [1 X 12544] = [64 X 12544]
+  // 1 * num_by_chans_ * spatial_sum_multiplier_ + 0 * temp_ = temp_;
+  //
   caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, channels_ * num,
       spatial_dim, 1, 1., num_by_chans_.cpu_data(),
       spatial_sum_multiplier_.cpu_data(), 0., temp_.mutable_cpu_data());
+
+  // top_data = top_data / temp_
   caffe_div(temp_.count(), top_data, temp_.cpu_data(), top_data);
   // TODO(cdoersch): The caching is only needed because later in-place layers
   //                 might clobber the data.  Can we skip this if they won't?
